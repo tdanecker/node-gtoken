@@ -1,9 +1,12 @@
-import axios from 'axios';
+import axios, {AxiosRequestConfig} from 'axios';
 import * as fs from 'fs';
 import * as jws from 'jws';
 import * as mime from 'mime';
 import * as pify from 'pify';
 import * as querystring from 'querystring';
+
+// tslint:disable-next-line variable-name
+const HttpsProxyAgent = require('https-proxy-agent');
 
 const readFile = pify(fs.readFile);
 
@@ -199,7 +202,15 @@ export class GoogleToken {
     if (!this.token) {
       throw new Error('No token to revoke.');
     }
-    return axios.get(GOOGLE_REVOKE_TOKEN_URL + this.token).then(r => {
+    const opts: AxiosRequestConfig = {}
+    // If the user configured an `HTTPS_PROXY` environment variable, create
+    // a custom agent to proxy the request.
+    const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
+    if (proxy) {
+        opts.httpsAgent = new HttpsProxyAgent(proxy);
+        opts.proxy = false;
+    }
+    return axios.get(GOOGLE_REVOKE_TOKEN_URL + this.token, opts).then(r => {
       this.configure({
         email: this.iss,
         sub: this.sub,
@@ -249,13 +260,22 @@ export class GoogleToken {
         additionalClaims);
     const signedJWT =
         jws.sign({header: {alg: 'RS256'}, payload, secret: this.key});
+    const opts: AxiosRequestConfig = {headers: {'Content-Type': 'application/x-www-form-urlencoded'}};
+    // If the user configured an `HTTPS_PROXY` environment variable, create
+    // a custom agent to proxy the request.
+    const proxy = process.env.HTTPS_PROXY || process.env.https_proxy;
+    if (proxy) {
+        opts.httpsAgent = new HttpsProxyAgent(proxy);
+        opts.proxy = false;
+    }
     return axios
         .post<TokenData>(
             GOOGLE_TOKEN_URL, querystring.stringify({
               grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer',
               assertion: signedJWT
             }),
-            {headers: {'Content-Type': 'application/x-www-form-urlencoded'}})
+            opts
+            )
         .then(r => {
           this.rawToken = r.data;
           this.token = r.data.access_token;
